@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>自动签到控制台</title>
+<style>
+/* ============ 设计令牌 ============ */
+:root{
+  --brand:#008B45; --brand-h:#007A3D; --brand-a:#006934; --brand-soft:rgba(0,139,69,.10);
+  --bg:#F4F6F7; --card:#FFF; --line:#E4E8EC; --line-soft:#EFF2F4;
+  --t1:#1A1D21; --t2:#5F6B76; --t3:#9AA4AE;
+  --danger:#E5484D; --warn:#D97706;
+  --r-card:12px; --r-row:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:-apple-system,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  background:var(--bg); color:var(--t1); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ============ 顶部 Tab ============ */
+.tabbar{
+  height:56px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;background:var(--card);border-bottom:1px solid var(--line);
+}
+.tabs{display:flex;align-items:center;gap:2px;height:100%}
+.tab{position:relative;height:100%;padding:0 14px;font-size:14px;color:var(--t2);transition:color .15s}
+.tab:hover{color:var(--t1)}
+.tab.active{color:var(--brand);font-weight:600}
+.tab.active::after{
+  content:"";position:absolute;left:14px;right:14px;bottom:0;height:2px;
+  background:var(--brand);border-radius:2px 2px 0 0;
+}
+.top-right{display:flex;align-items:center;gap:10px}
+.brand-name{font-size:13px;color:var(--t3);letter-spacing:.3px}
+
+/* ============ 状态条 ============ */
+.statusbar{
+  height:34px;flex:none;display:flex;align-items:center;gap:8px;
+  padding:0 18px;background:var(--card);border-bottom:1px solid var(--line);
+  font-size:12px;color:var(--t3);overflow:hidden;white-space:nowrap;
+}
+.statusbar b{color:var(--t2);font-weight:500}
+.statusbar b.ok{color:var(--brand)}
+.statusbar b.bad{color:var(--danger)}
+.statusbar .sep{color:var(--line);margin:0 2px}
+
+/* ============ 主体 ============ */
+.body{flex:1;display:flex;min-height:0}
+.body[hidden]{display:none}
+.list-pane{flex:1;display:flex;flex-direction:column;min-width:0}
+.rows{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+
+/* ---- 行 ---- */
+.row{
+  position:relative;
+  display:flex;align-items:center;gap:12px;padding:12px 46px 12px 14px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-row);
+  transition:border-color .15s,box-shadow .15s,background .15s;
+}
+.row:hover{border-color:#D8DEE4;box-shadow:0 1px 3px rgba(16,24,40,.05)}
+/* 已结束只是一个状态，不要把整行调淡 —— 那样会被误读成"被停用了" */
+.row.past .row-title{color:var(--t2)}
+/* 停用也不整体调淡，靠「空复选框 + 已停用胶囊」表达 */
+.row.unchecked{background:#FAFBFB}
+.cb{
+  width:18px;height:18px;flex:none;border-radius:5px;border:1.5px solid #CBD3DA;
+  background:var(--card);cursor:pointer;position:relative;transition:all .15s;outline:none;
+}
+.cb:hover{border-color:var(--brand)}
+.cb:focus-visible{box-shadow:0 0 0 3px var(--brand-soft)}
+.cb.on{background:var(--brand);border-color:var(--brand)}
+/* 对勾用内联 SVG：用 CSS 画「旋转的 L」在高 dpi / 不同缩放下总有点歪，
+   SVG 是矢量、能精确居中（2026-10-30 用户反馈「白勾有点歪」）。 */
+.cb svg{position:absolute;left:0;top:0;width:100%;height:100%;display:none}
+.cb.on svg{display:block}
+.cb svg path{
+  fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
+}
+.cb[disabled]{opacity:.5;cursor:default}
+.row-main{flex:1;min-width:0}
+.row-title{font-size:14px;font-weight:500;color:var(--t1)}
+.row-sub{font-size:12px;color:var(--t3);margin-top:2px;
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-meta{flex:none}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;
+  border-radius:6px;font-size:12px;background:var(--line-soft);color:var(--t2);
+}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.pill.live{background:var(--brand-soft);color:var(--brand)}
+.pill.done{background:#EAF6EF;color:var(--brand)}
+.pill.wait{background:#FFF6E8;color:var(--warn)}
+.pill.idle{background:var(--line-soft);color:var(--t3)}
+
+/* 行尾删除按钮：平时隐藏，鼠标移到这一行才出现（MaaEnd 的做法） */
+.row-del{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  width:26px;height:26px;border-radius:6px;display:grid;place-items:center;
+  color:var(--t3);opacity:0;pointer-events:none;transition:all .15s;
+}
+.row:hover .row-del{opacity:1;pointer-events:auto}
+.row-del:hover{background:#FDEDED;color:var(--danger)}
+.row-del:active{transform:translateY(-50%) scale(.9)}
+.row-del svg{width:14px;height:14px}
+
+/* ---- 底部操作栏 ---- */
+.actionbar{
+  height:60px;flex:none;display:flex;align-items:center;gap:10px;
+  padding:0 18px;background:var(--card);border-top:1px solid var(--line);
+}
+.spacer{flex:1}
+.btn{
+  display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;
+  border-radius:8px;font-size:13px;font-weight:500;transition:all .15s;
+}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-h)}
+.btn-primary:active{background:var(--brand-a)}
+.btn-primary[disabled]{background:#C9D2DA;cursor:not-allowed;transform:none}
+.btn-danger{background:var(--card);color:var(--danger);border:1px solid #F3C9CB}
+.btn-danger:hover{background:#FDEDED}
+.btn-danger[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+.ghost-btn{
+  display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:8px;font-size:13px;color:var(--t2);transition:background .15s,color .15s;
+}
+.ghost-btn:hover{background:var(--line-soft);color:var(--t1)}
+.ghost-btn:active{transform:translateY(1px)}
+
+/* ---- 右栏 ---- */
+.side-pane{width:360px;flex:none;padding:14px 18px 14px 0;display:flex;
+           flex-direction:column;gap:12px;min-height:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
+      display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.card-head{
+  height:40px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;font-size:13px;font-weight:500;border-bottom:1px solid var(--line-soft);
+}
+.card-head .hint{font-size:12px;color:var(--t3);font-weight:400}
+.frame-card{flex:none}
+.frame-box{
+  aspect-ratio:16/9;display:grid;place-items:center;background:#FBFCFC;
+  margin:12px;border-radius:8px;overflow:hidden;
+}
+.frame-box img{width:100%;height:100%;object-fit:contain;display:block}
+.ph{text-align:center;padding:0 16px}
+.ph-big{font-size:13px;color:var(--t2)}
+.ph-sub{font-size:12px;color:var(--t3);margin-top:4px}
+.log-card{flex:1}
+.log-body{
+  flex:1;overflow-y:auto;padding:10px 14px;font-family:Consolas,"Cascadia Mono",monospace;
+  font-size:12px;line-height:1.65;color:var(--t2);white-space:pre-wrap;word-break:break-all;
+}
+.log-body .t{color:var(--t3)}
+.log-body .ok{color:var(--brand)}
+.log-body .er{color:var(--danger)}
+
+/* ---- 设置 ---- */
+.settings{flex:1;overflow-y:auto;padding:18px}
+.set-group{background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
+           margin-bottom:14px;overflow:hidden;max-width:760px}
+.set-title{padding:12px 16px;font-size:13px;font-weight:600;color:var(--t1);
+           border-bottom:1px solid var(--line-soft)}
+.set-row{display:flex;align-items:center;gap:16px;padding:13px 16px;
+         border-bottom:1px solid var(--line-soft)}
+.set-row:last-child{border-bottom:none}
+.set-label{flex:1;min-width:0}
+.set-label b{display:block;font-size:13px;font-weight:500;color:var(--t1)}
+.set-label span{display:block;font-size:12px;color:var(--t3);margin-top:2px}
+.inp{
+  width:130px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:7px;
+  background:var(--card);font-size:13px;color:var(--t1);outline:none;
+  transition:border-color .15s,box-shadow .15s;font-family:inherit;
+}
+.inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.inp.sel{cursor:pointer}
+.set-note{max-width:760px;font-size:12px;color:var(--t3);line-height:1.8}
+.set-note code{background:var(--line-soft);padding:1px 5px;border-radius:4px;font-size:12px}
+
+.empty{padding:48px 20px;text-align:center;color:var(--t3);font-size:13px;line-height:1.9}
+
+#toast{
+  position:fixed;left:50%;bottom:80px;transform:translate(-50%,10px);
+  background:rgba(26,29,33,.92);color:#fff;font-size:13px;padding:9px 16px;
+  border-radius:8px;opacity:0;pointer-events:none;transition:all .22s;z-index:99;
+  max-width:70vw;text-align:center;
+}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:rgba(197,40,45,.94)}
+/* 上一节结论：只靠文字和一个小圆点表达状态，不加任何色带 */
+.lastbox{background:#fff;border:1px solid #E4E8EC;border-radius:12px;padding:12px 14px;margin:0 0 12px}
+.lb-title{font-size:13px;font-weight:600;color:#1A1D21;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lb-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.lb-dot.ok{background:#008B45}
+.lb-dot.bad{background:#C5282D}
+.lb-why{font-size:13px;color:#5F6B76;margin-top:6px;line-height:1.55}
+.lb-advice{font-size:12px;color:#9AA4AE;margin-top:4px;line-height:1.55}
+/* 首次配置面板：课程库 + 添加课程 */
+.cfgpanel{background:#fff;border:1px solid #E4E8EC;border-radius:12px;padding:14px;margin:0 0 12px}
+.cfg-title{font-size:13px;font-weight:600;color:#1A1D21;display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.cfg-title .ghost-btn{margin-left:auto}
+.cfg-chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;color:#5F6B76;background:#F4F6F7;border-radius:999px;padding:4px 10px}
+.chip b{color:#1A1D21;font-weight:600}
+.cfggrid{display:grid;grid-template-columns:1.2fr .7fr .7fr .7fr .8fr 1.2fr auto;gap:8px;align-items:center}
+@media (max-width:920px){.cfggrid{grid-template-columns:1fr 1fr 1fr}}
+.place{cursor:pointer;border-bottom:1px dashed #C9D2D9}
+.place:hover{color:#008B45}
+.place-none{color:#9AA4AE}
+.row-res{margin-top:2px;min-height:18px;line-height:18px}
+.row-res.muted{color:#9AA4AE}
+.row-res.ok{color:#008B45}
+.row-res.bad{color:#C5282D}
+.pill.missed{background:rgba(197,40,45,.08);color:#C5282D}
+.pill.missed .dot{background:#C5282D}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="tabbar">
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-view="week">本周课表</button>
+      <button class="tab" data-view="all">全部课程</button>
+      <button class="tab" data-view="settings">设置</button>
+    </div>
+    <div class="top-right"><span class="brand-name">自动签到</span></div>
+  </div>
+
+  <div class="statusbar">
+    <span>监控进程</span><b id="stRunning">—</b>
+    <span class="sep">|</span><span>PID</span><b id="stPid">—</b>
+    <span class="sep">|</span><span>下一节</span><b id="stNext">—</b>
+    <span class="sep">|</span><b id="stWeek">—</b>
+  </div>
+
+  <!-- ========== 本周课表 ========== -->
+  <div class="body" id="view-week">
+    <section class="list-pane">
+      <div class="lastbox" id="guideBox" style="display:none"></div>
+      <div class="rows" id="rows"></div>
+      <div class="actionbar">
+        <button class="ghost-btn" id="btnAll">
+          <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <span id="btnAllText">全选</span>
+        </button>
+        <button class="ghost-btn" id="btnRefresh">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+          刷新
+        </button>
+        <span class="spacer"></span>
+        <button class="btn btn-danger" id="btnStop">
+          <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          停止
+        </button>
+        <button class="btn btn-primary" id="btnStart">
+          <svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8V4z"/></svg>
+          启动监控
+        </button>
+      </div>
+    </section>
+
+    <aside class="side-pane">
+      <div class="card frame-card">
+        <div class="card-head">最新抓到的画面<span class="hint" id="frameHint">—</span></div>
+        <div class="frame-box" id="frameBox">
+          <div class="ph"><div class="ph-big">加载中…</div><div class="ph-sub"></div></div>
+        </div>
+      </div>
+      <div class="card log-card">
+        <div class="card-head">运行日志<span class="hint" id="logHint">—</span></div>
+        <div class="log-body" id="logBody">加载中…</div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ========== 全部课程 ========== -->
+  <div class="body" id="view-all" hidden>
+    <section class="list-pane">
+      <div class="cfgpanel">
+        <div class="cfg-title">课程库（来自 Canvas）
+          <button class="ghost-btn" id="btnDiscover">重新发现</button>
+        </div>
+        <div class="cfg-chips" id="courseChips"></div>
+        <div class="cfg-title" style="margin-top:14px">添加到课表</div>
+        <div class="cfggrid">
+          <select class="inp sel" id="addCourse"></select>
+          <select class="inp sel" id="addDay">
+            <option value="1">周一</option>
+            <option value="2">周二</option>
+            <option value="3">周三</option>
+            <option value="4">周四</option>
+            <option value="5">周五</option>
+            <option value="6">周六</option>
+            <option value="7">周日</option>
+          </select>
+          <input class="inp" id="addPeriods" placeholder="节次 1,2" spellcheck="false">
+          <input class="inp" id="addWeeks" value="1-16" placeholder="周次" spellcheck="false">
+          <input class="inp" id="addRoom" placeholder="教室（可选）" spellcheck="false">
+          <input class="inp" id="addAddr" placeholder="签到地点（可选，空=用全局）" spellcheck="false">
+          <button class="btn btn-primary" id="btnAddClass">添加</button>
+        </div>
+      </div>
+      <div class="rows" id="allRows"></div>
+      <div class="actionbar">
+        <span style="font-size:12px;color:var(--t3)">取消勾选 = 这一节课不再自动签到（只影响以后，不改历史）</span>
+        <span class="spacer"></span>
+        <button class="ghost-btn" id="btnReloadAll">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+          重新读取
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== 设置 ========== -->
+  <div class="body" id="view-settings" hidden>
+    <div class="settings">
+      <div class="set-group">
+        <div class="set-title">学校账号（jAccount）</div>
+        <div class="set-row">
+          <div class="set-label"><b>学号</b><span>jAccount 用户名</span></div>
+          <input class="inp" id="setUser" spellcheck="false" style="width:240px">
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>密码</b><span>只存在本机 data\credentials.json，不会回显、不会外传</span></div>
+          <input class="inp" id="setPass" type="password" spellcheck="false" style="width:240px"
+                 placeholder="要改才填">
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>状态</b><span id="credHint">—</span></div>
+          <button class="btn btn-primary" id="btnSaveCred">保存账号</button>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">签到坐标</div>
+        <div class="set-row">
+          <div class="set-label"><b>纬度</b><span>必须落在交大闵行校区内（30.96 ~ 31.09）</span></div>
+          <input class="inp" id="setLat" spellcheck="false">
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>经度</b><span>必须落在交大闵行校区内（121.36 ~ 121.52）</span></div>
+          <input class="inp" id="setLng" spellcheck="false">
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>地址文字</b><span>随签到请求一起提交</span></div>
+          <input class="inp" id="setAddr" style="width:300px" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">监控节奏</div>
+        <div class="set-row">
+          <div class="set-label"><b>课后继续盯</b><span>监视窗口结束时间 = 下课后 + 此值</span></div>
+          <select class="inp sel" id="setPost">
+            <option value="5">5 分钟</option>
+            <option value="10">10 分钟</option>
+            <option value="15">15 分钟</option>
+            <option value="20">20 分钟</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>截图间隔</b><span>越小越不容易漏码，但更吃 CPU（0.2 ~ 3.0 秒）</span></div>
+          <select class="inp sel" id="setGap">
+            <option value="0.3">0.3 秒</option>
+            <option value="0.6">0.6 秒</option>
+            <option value="1">1.0 秒</option>
+            <option value="1.5">1.5 秒</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="set-label"><b>实时画面</b><span>控制台多久刷新一次"它现在看到的画面"；关闭则不写任何截图</span></div>
+          <select class="inp sel" id="setLive">
+            <option value="0">关闭</option>
+            <option value="3">3 秒</option>
+            <option value="5">5 秒</option>
+            <option value="10">10 秒</option>
+            <option value="20">20 秒</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="set-note">
+        保存后需要<b>重启监控</b>才生效（监控进程只在启动时读一次配置）。<br>
+        开机自启请双击根目录的 <code>install-autostart.cmd</code>，取消用 <code>uninstall-autostart.cmd</code>。
+      </div>
+
+      <div class="actionbar" style="background:none;border:none;padding:16px 0 0">
+        <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+        <button class="ghost-btn" id="btnRestartWatch">保存并重启监控</button>
+        <button class="ghost-btn" id="btnReloadSettings">放弃修改</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= 工具 ================= */
+  var TOKEN = new URLSearchParams(location.search).get("token") || "";
+  var toastEl = document.getElementById("toast"), toastTimer = null;
+
+  /* ================= 前端异常自报 =================
+     页面一报错就只显示在黑框里，我这边完全看不到，只能靠用户描述"白屏了"。
+     所以把异常投给后端一次，落到 logs/ui-error.log —— 排查时我直接读文件。 */
+  function report(kind, msg, src, line, stack) {
+    try {
+      fetch(withToken("/api/cmd"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "ui.report",
+          args: {
+            kind: kind,
+            message: String(msg == null ? "" : msg).slice(0, 500),
+            source: String(src == null ? "" : src).slice(0, 200),
+            line: line || 0,
+            stack: String(stack == null ? "" : stack).slice(0, 2000)
+          }
+        })
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  window.addEventListener("error", function (e) {
+    report("error", e.message, e.filename, e.lineno, e.error && e.error.stack);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    report("reject", (r && r.message) || String(r), "", 0, r && r.stack);
+  });
+
+  function toast(msg, isErr) {
+    toastEl.textContent = msg;
+    toastEl.classList.toggle("err", !!isErr);
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 2400);
+  }
+
+  function withToken(path) {
+    return path + (path.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+  }
+
+  function cmd(name, args) {
+    return fetch(withToken("/api/cmd"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, args: args || {} })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.ok) {
+        var e = (j && j.error) || {};
+        throw new Error(e.message || ("命令失败：" + name));
+      }
+      return j.data;
+    });
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function fmtLeft(ms) {
+    if (ms <= 0) return "已结束";
+    var m = Math.round(ms / 60000);
+    if (m < 60) return "还有 " + m + " 分钟";
+    return "还有 " + Math.floor(m / 60) + " 小时" + (m % 60 ? " " + (m % 60) + " 分" : "");
+  }
+
+  /* ================= Tab ================= */
+  var views = {
+    week: document.getElementById("view-week"),
+    all: document.getElementById("view-all"),
+    settings: document.getElementById("view-settings")
+  };
+  var currentView = "week";
+
+  document.getElementById("tabs").addEventListener("click", function (e) {
+    var btn = e.target.closest(".tab");
+    if (!btn) return;
+    var name = btn.dataset.view;
+    if (!views[name]) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
+      t.classList.toggle("active", t === btn);
+    });
+    Object.keys(views).forEach(function (k) { views[k].hidden = (k !== name); });
+    currentView = name;
+    if (name === "all") loadAllCourses();
+    if (name === "settings") loadSettings();
+  });
+
+  /* ================= 数据 ================= */
+  var allClasses = [];         // schedule.get.all 返回的 classes
+  var classIndexByKey = {};    // "course|day|periods" -> 下标
+
+  function buildIndex() {
+    classIndexByKey = {};
+    allClasses.forEach(function (c) {
+      var key = [c.course, c.day, (c.periods || []).join(",")].join("|");
+      classIndexByKey[key] = c.index;
+    });
+  }
+
+  function loadClasses() {
+    return cmd("schedule.get.all").then(function (d) {
+      allClasses = d.classes || [];
+      buildIndex();
+      return d;
+    });
+  }
+
+  /* ================= 状态条 ================= */
+  function renderStatus(s) {
+    var el = document.getElementById("stRunning");
+    var hb = s.heartbeat || {};
+    if (s.running && !hb.stale) { el.textContent = "● 运行中"; el.className = "ok"; }
+    else if (s.running && hb.stale) { el.textContent = "● 疑似卡住"; el.className = "bad"; }
+    else { el.textContent = "● 已停止"; el.className = "bad"; }
+
+    document.getElementById("stPid").textContent = s.pid || "—";
+
+    var nx = s.next;
+    document.getElementById("stNext").textContent =
+      nx ? (nx.start + "  " + nx.course) : "本周已无课";
+
+    var ph = { sleeping: "（休眠中）", waiting: "（等待中）", watching: "（监视中）" };
+    document.getElementById("stWeek").textContent =
+      "本周第 " + s.week + " 周" + (ph[hb.phase] || "");
+
+    document.getElementById("btnStart").disabled = !!s.running;
+    document.getElementById("btnStop").disabled = !s.running;
+
+  }
+
+  /* ================= 本周课表 ================= */
+  function renderRows(s) {
+    var box = document.getElementById("rows");
+    var list = s.sessions || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">本周没有需要签到的课。<br>'
+        + '去「全部课程」看看课表是否填全了。</div>';
+      return;
+    }
+    var now = Date.now();
+    // 把"最近几节"的结论按 (课程, 日期) 建索引，渲染本周课表时直接挂到对应行上
+    var resIndex = {};
+    (s.history || []).forEach(function (r) {
+      var key = String(r.courseId || "") + "|" + String(r.at || "").slice(0, 10);
+      resIndex[key] = r;
+    });
+    box.innerHTML = list.map(function (it) {
+      var key = [it.course, it.day, (it.periods || []).join(",")].join("|");
+      var idx = classIndexByKey[key];
+      var meta = (idx === undefined) ? null : allClasses[idx];
+      // 以后端返回的 enabled 为准（停用的课也会返回，只是标记为 false）
+      var enabled = (it.enabled === undefined) ? true : !!it.enabled;
+      var rec = resIndex[String(it.courseId || "") + "|" + it.date] || null;
+
+      var t0 = Date.parse(it.startISO), t1 = Date.parse(it.endISO);
+      var cls, text;
+      if (!enabled) { cls = "idle"; text = "已停用"; }
+      else if (rec) { cls = rec.ok ? "live" : "missed"; text = rec.ok ? "已签到" : "没签上"; }
+      else if (it.passed) { cls = "idle"; text = "已结束"; }
+      else if (now >= t0 && now <= t1) { cls = "live"; text = "监控中"; }
+      else { cls = "idle"; text = "尚未签到"; }
+
+      var sub = it.day + " 第 " + (it.periods || []).join("-") + " 课时"
+        + (it.room ? " · " + it.room : "")
+        + (meta && meta.weeks ? " · " + meta.weeks + " 周" : "")
+        + " · 监视 " + it.start + " → " + it.end;
+      // 这一行**每块都渲染**（哪怕是空占位），否则有没有结果会让行高不一样。
+      var recLine;
+      if (rec) {
+        var when = String(rec.at || "").slice(11, 16);
+        recLine = '<div class="row-sub row-res ' + (rec.ok ? "ok" : "bad") + '">'
+          + (rec.ok ? "✓ " : "✗ ") + esc(when + " " + (rec.ok ? "签到成功" : (rec.why || "没签上")))
+          + '</div>';
+      } else if (!enabled) {
+        recLine = '<div class="row-sub row-res muted">这一节已停用，不会自动签到</div>';
+      } else if (it.passed) {
+        recLine = '<div class="row-sub row-res">&nbsp;</div>';
+      } else if (now >= t0 && now <= t1) {
+        recLine = '<div class="row-sub row-res muted">正在监视 · 距结束 '
+          + esc(fmtLeft(t1 - now).replace(/^还有 /, "")) + '</div>';
+      } else {
+        recLine = '<div class="row-sub row-res muted">' + esc(fmtLeft(t0 - now)) + '后开始监视</div>';
+      }
+
+      return '<div class="row'
+        + (enabled ? "" : " unchecked") + '" data-idx="' + (idx === undefined ? "" : idx) + '">'
+        + '<div class="cb' + (enabled ? " on" : "") + '" role="checkbox" tabindex="0"'
+        + ' aria-checked="' + (enabled ? "true" : "false") + '">'
+        + '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.6 9.4l2.9 2.9 5.9-6.4"/></svg>'
+        + '</div>'
+        + '<div class="row-main">'
+        + '<div class="row-title">' + esc(it.course) + '</div>'
+        + '<div class="row-sub">' + esc(sub) + '</div>'
+        + recLine
+        + '</div>'
+        + '<div class="row-meta"><span class="pill ' + cls + '"><i class="dot"></i>'
+        + text + '</span></div>'
+        + (idx === undefined ? "" :
+            '<button class="row-del" title="从课表里删掉这一节" data-idx="' + idx + '">'
+            + '<svg viewBox="0 0 24 24"><path d="M3 6h18"/>'
+            + '<path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>'
+            + '<path d="M10 11v6"/><path d="M14 11v6"/></svg></button>')
+        + '</div>';
+    }).join("");
+    updateAllBtn();
+  }
+
+  function updateAllBtn() {
+    var rows = document.querySelectorAll("#rows .row");
+    var on = 0;
+    Array.prototype.forEach.call(rows, function (r) {
+      if (r.querySelector(".cb.on")) on++;
+    });
+    document.getElementById("btnAllText").textContent =
+      (rows.length && on === rows.length) ? "取消全选" : "全选";
+  }
+
+  /* ================= 画面 ================= */
+  var frameSig = "";
+
+  function renderFrame(f) {
+    var box = document.getElementById("frameBox");
+    var hint = document.getElementById("frameHint");
+
+    if (!f.available) {
+      hint.textContent = "—";
+      // 三种不可用各有各的说法，别一律说成"还没有截到画面"
+      var big, sub;
+      if (f.reason === "stale") {
+        big = "未在抓取画面";
+        sub = "上次抓取：" + (f.lastTime || "—");
+      } else if (f.reason === "blank") {
+        big = f.label || "画面是空白的";
+        sub = f.lastTime ? ("上次抓取：" + f.lastTime + "，画面是全黑/全白")
+                         : "画面是全黑/全白，直播可能还没开始";
+      } else {
+        big = "还没有截到画面";
+        sub = "开始监控后这里会显示直播画面";
+      }
+      var sig = "ph|" + big + "|" + sub;
+      if (sig === frameSig) return;
+      frameSig = sig;
+      box.innerHTML = '<div class="ph"><div class="ph-big">' + esc(big)
+        + '</div><div class="ph-sub">' + esc(sub) + '</div></div>';
+      return;
+    }
+
+    hint.textContent = "抓于 " + (f.takenAt || "");
+    var sig2 = "img|" + (f.name || "") + "|" + (f.takenAt || "");
+    if (sig2 === frameSig) return;
+    // 监视期间同一个文件每 5 秒更新一次，只换 src 不重建 DOM，避免闪一下
+    var sameFile = frameSig.indexOf("img|" + (f.name || "") + "|") === 0;
+    frameSig = sig2;
+    if (sameFile) {
+      var im = box.querySelector("img");
+      if (im) { im.src = withToken("/api/frame") + "&t=" + Date.now(); return; }
+    }
+    box.innerHTML = '<img alt="签到画面" src="'
+      + withToken("/api/frame") + "&t=" + Date.now() + '">';
+  }
+
+  /* ================= 日志 ================= */
+  var logSig = "";
+
+  function colorLog(line) {
+    var s = esc(line);
+    s = s.replace(/(\d{2}:\d{2}:\d{2})/g, '<span class="t">$1</span>');
+    s = s.replace(/(★+|√|签到成功)/g, '<span class="ok">$1</span>');
+    s = s.replace(/(失败|错误|超时|Exception)/g, '<span class="er">$1</span>');
+    return s;
+  }
+
+  function loadLog() {
+    return fetch(withToken("/api/log?n=120"))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var lines = (j && j.lines) || [];
+        var sig = lines.length + "|" + (lines[lines.length - 1] || "");
+        if (sig === logSig) return;
+        logSig = sig;
+        var body = document.getElementById("logBody");
+        body.innerHTML = lines.length
+          ? lines.map(colorLog).join("\n")
+          : "还没有日志。";
+        body.scrollTop = body.scrollHeight;
+        document.getElementById("logHint").textContent =
+          lines.length ? lines.length + " 行" : "—";
+      }).catch(function () {});
+  }
+
+  /* ================= 刷新 ================= */
+  var _backendChecked = false;
+
+  // 2026-10-30 踩到：页面是源码里的新版，但 8791 上跑的仍是旧 exe 起的老后端
+  // （老后端不认识 history 字段）→ 课表行全变回「已结束」，看着像功能丢了。
+  // 这里加一道自检：老后端直接提示「关掉重开」。
+  function checkBackendVersion(s) {
+    if (_backendChecked) return;
+    _backendChecked = true;
+    if (s.history !== undefined) return;
+    var g = document.getElementById("guideBox");
+    g.style.display = "";
+    g.innerHTML = '<div class="lb-title"><span class="lb-dot bad"></span>连着的后端是旧版本</div>'
+      + '<div class="lb-why">页面本身是新版，但 8791 端口上跑的还是旧进程，'
+      + '所以读不到签到历史和每节课的结果。</div>'
+      + '<div class="lb-advice">关掉这个窗口，双击 run-dashboard.cmd 重新打开即可。'
+      + '（签到程序本体没受影响，不用管它。）</div>';
+  }
+
+  function refresh() {
+    return cmd("state.get").then(function (s) {
+      checkBackendVersion(s);
+      renderStatus(s);
+      renderRows(s);
+      renderFrame(s.frame || {});
+    }).catch(function () {
+      var el = document.getElementById("stRunning");
+      el.textContent = "● 连不上后端";
+      el.className = "bad";
+    });
+  }
+
+  /* ================= 全部课程 ================= */
+  function loadAllCourses() {
+    var box = document.getElementById("allRows");
+    // 记住滚动位置：改完一个地点、加完一门课之后，别让列表跳回顶部
+    var keepTop = box.scrollTop;
+    box.innerHTML = '<div class="empty">加载中…</div>';
+    loadClasses().then(function (d) {
+      var list = d.classes || [];
+      if (!list.length) {
+        box.innerHTML = '<div class="empty">课表里还没有任何上课段。</div>';
+        return;
+      }
+      box.innerHTML = list.map(function (c) {
+        var sub = "ID " + (c.courseId == null ? "缺失" : c.courseId)
+          + " · " + c.day + " 第 " + (c.periods || []).join("-") + " 课时"
+          + " · " + (c.weeks || "") + " 周"
+          + (c.room ? " · " + c.room : "");
+        var placeTxt = c.address ? esc(c.address) : "用全局地点";
+        var placeCls = c.address ? "place" : "place place-none";
+        var sub2 = '地点：<span class="' + placeCls + '" data-idx="' + c.index
+          + '" data-addr="' + esc(c.address || "") + '">' + placeTxt + '</span>'
+          + '<span style="color:#9AA4AE">（点一下可改）</span>';
+        var pill = c.enabled
+          ? '<span class="pill live"><i class="dot"></i>已启用</span>'
+          : '<span class="pill idle"><i class="dot"></i>已停用</span>';
+        return '<div class="row' + (c.enabled ? "" : " unchecked")
+          + '" data-idx="' + c.index + '">'
+          + '<div class="cb' + (c.enabled ? " on" : "") + '" role="checkbox" tabindex="0"'
+          + ' aria-checked="' + (c.enabled ? "true" : "false") + '">'
+          + '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.6 9.4l2.9 2.9 5.9-6.4"/></svg>'
+          + '</div>'
+          + '<div class="row-main">'
+          + '<div class="row-title">' + esc(c.course) + '</div>'
+          + '<div class="row-sub">' + esc(sub) + '</div>'
+          + '<div class="row-sub">' + sub2 + '</div>'
+          + '</div>'
+          + '<div class="row-meta">' + pill + '</div>'
+          + '<button class="row-del" title="从课表里删掉这一节" data-idx="' + c.index + '">'
+          + '<svg viewBox="0 0 24 24"><path d="M3 6h18"/>'
+          + '<path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>'
+          + '<path d="M10 11v6"/><path d="M14 11v6"/></svg></button>'
+          + '</div>';
+      }).join("");
+      box.scrollTop = keepTop;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">读不到课表：' + esc(e.message) + '</div>';
+    });
+  }
+
+  /* ========== 每门课的签到地点：点一下就改 ========== */
+  function startEditPlace(sp) {
+    if (sp.querySelector("input")) return;
+    var idx = sp.getAttribute("data-idx");
+    var cur = sp.getAttribute("data-addr") || "";
+    sp.innerHTML = '<input class="inp place-edit" style="width:320px" spellcheck="false">';
+    var inp = sp.querySelector("input");
+    inp.value = cur;
+    inp.focus();
+    inp.select();
+    var finished = false;
+    function showPlace(addr) {
+      sp.className = addr ? "place" : "place place-none";
+      sp.setAttribute("data-addr", addr);
+      sp.textContent = addr || "用全局地点";
+    }
+    function commit(save) {
+      if (finished) return;
+      finished = true;
+      var v = inp.value.trim();
+      if (!save) { showPlace(cur); return; }
+      cmd("schedule.update", { index: Number(idx), patch: { address: v } })
+        .then(function () {
+          // 只改这一行的显示，不重排整个列表 → 滚动位置完全不动
+          showPlace(v);
+          toast(v ? "地点已更新" : "已改回用全局地点");
+        })
+        .catch(function (e) {
+          showPlace(cur);
+          toast(e.message, true);
+        });
+    }
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(true); }
+      if (e.key === "Escape") { e.preventDefault(); commit(false); }
+    });
+    inp.addEventListener("blur", function () { commit(true); });
+  }
+
+  document.getElementById("allRows").addEventListener("click", function (ev) {
+    var t = ev.target;
+    while (t && t !== this && !(t.classList && t.classList.contains("place"))) {
+      t = t.parentNode;
+    }
+    if (t && t.classList && t.classList.contains("place")) startEditPlace(t);
+  });
+
+  /* ========== 首次配置：账号 / 课程库 / 加课 ========== */
+  var courseLib = [];
+  var credState = {};
+
+  function renderGuide() {
+    var box = document.getElementById("guideBox");
+    if (!box) return;
+    var todo = [];
+    if (!credState || !credState.hasPassword) todo.push("填学校账号密码");
+    if (!courseLib.length) todo.push("发现课程");
+    if (!todo.length) { box.style.display = "none"; return; }
+    box.style.display = "";
+    box.innerHTML = '<div class="lb-title"><span class="lb-dot bad"></span>还没配置完</div>'
+      + '<div class="lb-why">还差：' + esc(todo.join("　·　")) + '</div>'
+      + '<div class="lb-advice">三步：①「设置」页填学号密码　②「全部课程」页点「重新发现」　'
+      + '③ 选课程 + 节次 + 周次，点「添加」</div>';
+  }
+
+  function loadCredentials() {
+    return cmd("credentials.get").then(function (c) {
+      credState = c || {};
+      document.getElementById("setUser").value = credState.username || "";
+      document.getElementById("credHint").textContent = credState.hasPassword
+        ? "已保存。要改密码就重新填一次再「保存账号」。"
+        : "还没填，填好后才能自动登录 Canvas。";
+      renderGuide();
+      return c;
+    }).catch(function () {});
+  }
+
+  function loadCourseLib() {
+    return cmd("courses.list").then(function (d) {
+      courseLib = (d && d.courses) || [];
+      var chips = document.getElementById("courseChips");
+      chips.innerHTML = courseLib.length
+        ? courseLib.map(function (c) {
+            return '<span class="chip"><b>' + esc(c.name || "") + '</b>　'
+              + esc(String(c.courseId || "")) + '</span>';
+          }).join("")
+        : '<span class="chip">还没有课程库 —— 点右边「重新发现」</span>';
+      var sel = document.getElementById("addCourse");
+      sel.innerHTML = courseLib.length
+        ? courseLib.map(function (c, i) {
+            return '<option value="' + i + '">' + esc(c.name || "") + '</option>';
+          }).join("")
+        : '<option value="">（先发现课程）</option>';
+      renderGuide();
+      return d;
+    }).catch(function () {});
+  }
+
+  document.getElementById("btnSaveCred").addEventListener("click", function () {
+    var u = document.getElementById("setUser").value.trim();
+    var p = document.getElementById("setPass").value;
+    if (!u) { toast("学号要填", true); return; }
+    if (!p) { toast("密码要填（要改才填）", true); return; }
+    cmd("credentials.set", { username: u, password: p })
+      .then(function () {
+        document.getElementById("setPass").value = "";
+        toast("账号已保存");
+        return loadCredentials();
+      })
+      .catch(function (e) { toast(e.message, true); });
+  });
+
+  document.getElementById("btnDiscover").addEventListener("click", function () {
+    var btn = this;
+    btn.disabled = true;
+    toast("正在发现课程：会开浏览器登录，约 40 秒…");
+    cmd("courses.discover")
+      .then(function (d) {
+        toast("发现 " + d.count + " 门课程");
+        return loadCourseLib();
+      })
+      .catch(function (e) { toast(String(e.message).split("\n")[0], true); })
+      .then(function () { btn.disabled = false; });
+  });
+
+  document.getElementById("btnAddClass").addEventListener("click", function () {
+    var i = Number(document.getElementById("addCourse").value);
+    var c = courseLib[i];
+    if (!c) { toast("先选一门课（没有课程库就先点「重新发现」）", true); return; }
+    var raw = document.getElementById("addPeriods").value;
+    var ps = raw.split(/[,，\s]+/).filter(Boolean).map(Number);
+    if (!ps.length || ps.some(function (x) { return !(x >= 1 && x <= 14); })) {
+      toast("节次要填 1~14 之间的数字，例如 1,2", true);
+      return;
+    }
+    cmd("schedule.add", {
+      course: c.name,
+      courseId: c.courseId,
+      toolId: c.toolId || 8329,
+      day: Number(document.getElementById("addDay").value),
+      periods: ps,
+      weeks: document.getElementById("addWeeks").value.trim() || "1-16",
+      room: document.getElementById("addRoom").value.trim(),
+      address: document.getElementById("addAddr").value.trim()
+    }).then(function (d) {
+      toast("已加到课表（共 " + (d.count || "?") + " 段）");
+      return loadAllCourses();
+    }).then(function () {
+      return loadClasses();
+    }).then(function () {
+      return refresh();
+    }).catch(function (e) { toast(e.message, true); });
+  });
+
+  /* ================= 勾选（两个视图共用） ================= */
+  function toggleAt(row) {
+    var raw = row.getAttribute("data-idx");
+    if (raw === "" || raw === null) { toast("这一段没匹配到课表项，去「全部课程」里改", true); return; }
+    var idx = Number(raw);
+    var cb = row.querySelector(".cb");
+    var want = !cb.classList.contains("on");
+    cb.disabled = true;
+
+    cmd("schedule.setEnabled", { index: idx, enabled: want })
+      .then(function () {
+        cb.disabled = false;
+        cb.classList.toggle("on", want);
+        cb.setAttribute("aria-checked", want ? "true" : "false");
+        row.classList.toggle("unchecked", !want);
+        var pill = row.querySelector(".row-meta .pill");
+        if (pill) {
+          pill.className = "pill " + (want ? "live" : "idle");
+          pill.innerHTML = '<i class="dot"></i>' + (want ? "已启用" : "已停用");
+        }
+        if (allClasses[idx]) allClasses[idx].enabled = want;
+        toast(want ? "已启用" : "已停用");
+        if (currentView === "week") refresh();
+      })
+      .catch(function (e) {
+        cb.disabled = false;
+        toast(e.message, true);
+      });
+  }
+
+  function bindRows(container) {
+    container.addEventListener("click", function (e) {
+      var del = e.target.closest(".row-del");
+      if (del) { e.stopPropagation(); removeAt(del.closest(".row")); return; }
+      var cb = e.target.closest(".cb");
+      if (cb) { toggleAt(cb.closest(".row")); return; }
+    });
+    container.addEventListener("keydown", function (e) {
+      if (e.key !== " " && e.key !== "Enter") return;
+      var cb = e.target.closest(".cb");
+      if (!cb) return;
+      e.preventDefault();
+      toggleAt(cb.closest(".row"));
+    });
+  }
+
+  /* 彻底删掉一节课（删除是不可逆的，所以先确认） */
+  function removeAt(row) {
+    var raw = row.getAttribute("data-idx");
+    if (raw === "" || raw === null) { toast("这一行没匹配到课表项", true); return; }
+    var idx = Number(raw);
+    var meta = allClasses[idx];
+    var name = meta ? meta.course : "这一节";
+    var when = meta ? (meta.day + " 第 " + (meta.periods || []).join("-") + " 课时"
+      + (meta.weeks ? " · " + meta.weeks + " 周" : "")) : "";
+    if (!confirm("从课表里删掉「" + name + "  " + when + "」？\n\n"
+      + "删掉后这节课不会再自动签到。\n"
+      + "如果只是暂时不想签，请改用左边的勾选框（取消勾选即可，行不会消失）。")) return;
+
+    cmd("schedule.remove", { index: idx })
+      .then(function (r) { toast("已删除" + (r && r.removed ? "：" + r.removed : "")); return loadClasses(); })
+      .then(refresh)
+      .catch(function (e) { toast(e.message, true); });
+  }
+  bindRows(document.getElementById("rows"));
+  bindRows(document.getElementById("allRows"));
+
+  /* ================= 按钮 ================= */
+  document.getElementById("btnAll").addEventListener("click", function () {
+    var rows = document.querySelectorAll("#rows .row");
+    if (!rows.length) return;
+    var allOn = Array.prototype.every.call(rows, function (r) {
+      return !!r.querySelector(".cb.on");
+    });
+    var idxs = [];
+    Array.prototype.forEach.call(rows, function (r) {
+      var isOn = !!r.querySelector(".cb.on");
+      var raw = r.getAttribute("data-idx");
+      if (isOn !== allOn && raw !== "" && raw !== null) idxs.push(Number(raw));
+    });
+    if (!idxs.length) { toast("没有需要改的"); return; }
+
+    Promise.all(idxs.map(function (i) {
+      return cmd("schedule.setEnabled", { index: i, enabled: allOn });
+    })).then(function () {
+      toast(allOn ? "已全部启用" : "已全部停用");
+      return loadClasses();
+    }).then(refresh).catch(function (e) { toast(e.message, true); });
+  });
+
+  document.getElementById("btnStart").addEventListener("click", function () {
+    this.disabled = true;
+    cmd("autowatch.start")
+      .then(function () { toast("已启动监控"); return refresh(); })
+      .catch(function (e) { toast(e.message, true); refresh(); });
+  });
+
+  document.getElementById("btnStop").addEventListener("click", function () {
+    cmd("autowatch.stop")
+      .then(function () { toast("已停止监控"); return refresh(); })
+      .catch(function (e) { toast(e.message, true); refresh(); });
+  });
+
+  document.getElementById("btnRefresh").addEventListener("click", function () {
+    Promise.all([loadClasses(), refresh(), loadLog()])
+      .then(function () { toast("已刷新"); })
+      .catch(function (e) { toast(e.message, true); });
+  });
+
+  document.getElementById("btnReloadAll").addEventListener("click", function () {
+    loadAllCourses();
+    toast("已重新读取");
+  });
+
+  /* ================= 设置 ================= */
+  function fillSettings(s) {
+    var ck = s.checkin || {}, w = s.watch || {};
+    document.getElementById("setLat").value = ck.lat || "";
+    document.getElementById("setLng").value = ck.lng || "";
+    document.getElementById("setAddr").value = ck.address || "";
+
+    var post = String(w.postMin == null ? 10 : w.postMin);
+    var gap = String(w.sampleGap == null ? 0.6 : w.sampleGap);
+    var live = String(w.liveEvery == null ? 5 : w.liveEvery);
+    var selPost = document.getElementById("setPost");
+    var selGap = document.getElementById("setGap");
+    var selLive = document.getElementById("setLive");
+    var has = function (sel, v) {
+      return Array.prototype.some.call(sel.options, function (o) { return o.value === v; });
+    };
+    if (!has(selPost, post)) selPost.add(new Option(post + " 分钟", post));
+    if (!has(selGap, gap)) selGap.add(new Option(gap + " 秒", gap));
+    if (!has(selLive, live)) selLive.add(new Option(live + " 秒", live));
+    selPost.value = post;
+    selGap.value = gap;
+    selLive.value = live;
+  }
+
+  function loadSettings() {
+    return cmd("settings.get").then(fillSettings).catch(function (e) {
+      toast("读设置失败：" + e.message, true);
+    });
+  }
+
+  function saveSettings() {
+    var patch = {
+      checkin: {
+        lat: document.getElementById("setLat").value.trim(),
+        lng: document.getElementById("setLng").value.trim(),
+        address: document.getElementById("setAddr").value.trim()
+      },
+      watch: {
+        postMin: Number(document.getElementById("setPost").value),
+        sampleGap: Number(document.getElementById("setGap").value),
+        liveEvery: Number(document.getElementById("setLive").value)
+      }
+    };
+    return cmd("settings.set", patch);
+  }
+
+  document.getElementById("btnSaveSettings").addEventListener("click", function () {
+    saveSettings()
+      .then(function () { toast("已保存（重启监控后生效）"); })
+      .catch(function (e) { toast(e.message, true); });
+  });
+
+  document.getElementById("btnRestartWatch").addEventListener("click", function () {
+    saveSettings()
+      .then(function () { toast("正在重启监控…"); return cmd("autowatch.restart"); })
+      .then(function () { toast("监控已重启，新设置已生效"); return refresh(); })
+      .catch(function (e) { toast(e.message, true); });
+  });
+
+  document.getElementById("btnReloadSettings").addEventListener("click", function () {
+    loadSettings().then(function () { toast("已放弃修改"); });
+  });
+
+  /* ================= 启动 ================= */
+  if (!TOKEN) {
+    document.body.innerHTML = '<div class="empty" style="padding-top:120px">'
+      + '缺少访问令牌。<br><br>请用 <code>run-dashboard.cmd</code> 或开始菜单打开控制台，'
+      + '不要直接双击 HTML 文件。</div>';
+    return;
+  }
+
+  loadClasses().then(refresh).catch(refresh);
+  loadCredentials();
+  loadCourseLib();
+  loadLog();
+  setInterval(function () {
+    if (currentView === "week") refresh();
+    loadLog();
+  }, 2000);
+})();
+</script>
+</body>
+</html>

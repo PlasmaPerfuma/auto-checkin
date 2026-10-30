@@ -1,0 +1,57 @@
+# ---- 个人数据 / 凭据（绝不能提交）----
+
+data/
+data/credentials.json
+data/mlearning-token.txt
+data/mlearning-token.json
+data/courses.json
+data/schedule.json
+data/settings.json
+data/backups/
+chrome-profile/
+logs/
+output/
+
+# ---- 体积大 / 可再生的东西 ----
+libs/
+vendor/
+tmp/
+probe/
+release/
+*.7z
+*.zip
+*.exe
+
+# ---- 调试残留 ----
+debug.log
+extension.txt
+*.log
+*.png
+!docs/*.png
+
+# ---- 只有开发者本机用得上的脚本（换台机器就没意义）----
+fix-dsh-sandbox.cmd
+move-temp-to-d.cmd
+try-exe.cmd
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# ---- 打包中间产物 ----
+build/
+dist/
+*.spec
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- 本机专用（含绝对路径/旧入口）----
+archive/
+*.lnk
